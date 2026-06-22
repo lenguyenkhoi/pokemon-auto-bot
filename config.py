@@ -22,4 +22,4 @@ SHUFFLE_BUTTON_POS = (1820, 340)  # Vị trí nút có hình dấu hỏi chấm 
 
 # Đường dẫn tài nguyên và số lượng hình pokemon
 TEMPLATES_DIR = "assets/"
-NUM_POKEMON_TYPES = 18
+NUM_POKEMON_TYPES = 36
