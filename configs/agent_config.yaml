@@ -1,0 +1,59 @@
+# ============================================================
+# Agent Configuration
+# ============================================================
+
+agent:
+  algorithm: "DQN"           # Thuật toán RL: DQN | PPO | A2C | DDQN
+  epsilon_start: 1.0         # Epsilon ban đầu (khám phá 100%)
+  epsilon_end: 0.05          # Epsilon tối thiểu
+  epsilon_decay: 0.995       # Tốc độ giảm epsilon mỗi episode
+  gamma: 0.99                # Discount factor
+  replay_buffer_size: 10000  # Kích thước replay buffer
+  batch_size: 64             # Batch size khi sample từ buffer
+  target_update_freq: 100    # Tần suất update target network (steps)
+
+# ============================================================
+# Model Configuration
+# ============================================================
+
+model:
+  type: "CNN"                # Kiến trúc: CNN | DNN | Transformer
+  input_channels: 1          # Số channels input
+  hidden_dim: 256            # Số neurons ẩn
+  dropout: 0.1               # Dropout rate
+  activation: "relu"         # Hàm kích hoạt
+
+# ============================================================
+# Environment Configuration
+# ============================================================
+
+environment:
+  headless: true             # True = không render UI (train nhanh hơn)
+  board_rows: 8              # Số hàng bàn cờ
+  board_cols: 12             # Số cột bàn cờ
+  n_pokemon_types: 20        # Số loại pokemon
+  time_limit: 300            # Thời gian tối đa 1 game (giây)
+  fps: 60                    # FPS khi render
+
+# ============================================================
+# Training Configuration
+# ============================================================
+
+training:
+  n_episodes: 5000           # Tổng số episodes training
+  max_steps_per_episode: 500 # Số bước tối đa mỗi episode
+  learning_rate: 0.001       # Learning rate
+  eval_freq: 100             # Đánh giá mỗi N episodes
+  checkpoint_freq: 200       # Lưu checkpoint mỗi N episodes
+  log_freq: 10               # Log metrics mỗi N episodes
+
+# ============================================================
+# Paths
+# ============================================================
+
+paths:
+  game_dir: "Pikachu-Matching-Game"
+  checkpoint_dir: "logs/checkpoints"
+  tensorboard_dir: "logs/tensorboard"
+  runs_dir: "logs/runs"
+  data_dir: "data"
