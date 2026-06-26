@@ -1,116 +1,104 @@
 import pygame
-import random
 import numpy as np
+import random
 
-class PokemonEnv:
-    def __init__(self, width=16, height=9):
-        self.width = width
-        self.height = height
-        # Định nghĩa các phần thưởng (Reward)
-        self.REWARD_MATCH = 10      # Nối đúng cặp
-        self.REWARD_WRONG = -2      # Chọn sai hoặc không nối được
-        self.REWARD_WIN = 50        # Thắng game (hết map)
-        self.REWARD_STALL = -1      # Phạt mỗi bước đi quá lâu hoặc chọn lại ô cũ
+class PikachuEnv:
+    def __init__(self, rows=8, cols=12):
+        self.rows = rows
+        self.cols = cols
+        self.score = 0
         
+        # Giả định game có 20 loại Pokemon khác nhau (ID từ 1 đến 20, 0 là ô trống)
+        self.num_pokemon_types = 20 
+        
+        # Khởi tạo ma trận bàn cờ rỗng (bao gồm cả viền bao quanh để chạy thuật toán nối đường)
+        self.state = np.zeros((self.rows + 2, self.cols + 2), dtype=np.int32)
+        
+        # Khởi tạo Pygame ngầm (Không cần vòng lặp sự kiện của con người)
+        pygame.init()
         self.reset()
 
     def reset(self):
         """
-        Khởi tạo lại map mới ngẫu nhiên mỗi vòng chơi.
-        Đảm bảo các icon xuất hiện theo cặp để game có thể giải được.
+        Nhiệm vụ 2: Tạo map mới ngẫu nhiên mỗi vòng chơi.
+        Đảm bảo các cặp Pokemon luôn xuất hiện theo cặp chẵn để có thể phá đảo.
         """
         self.score = 0
-        self.done = False
-        self.selected_tile = None # Lưu tọa độ ô thứ nhất được chọn (x1, y1)
+        total_cells = self.rows * self.cols
         
-        # 1. Tạo danh sách các cặp icon ngẫu nhiên (ví dụ có 20 loại pokemon)
-        num_tiles = self.width * self.height
-        assert num_tiles % 2 == 0, "Tổng số ô của map phải là số chẵn!"
+        # 1. Tạo danh sách các cặp Pokemon chẵn
+        half_cells = total_cells // 2
+        pokemon_pool = []
+        for _ in range(half_cells):
+            pokemon_id = random.randint(1, self.num_pokemon_types)
+            pokemon_pool.extend([pokemon_id, pokemon_id]) # Thêm 1 cặp giống nhau
+            
+        # 2. Trộn ngẫu nhiên danh sách
+        random.shuffle(pokemon_pool)
         
-        half_tiles = num_tiles // 2
-        # Tạo danh sách các id icon từ 1 đến 20
-        pool = [random.randint(1, 20) for _ in range(half_tiles)]
-        # Nhân đôi để tạo thành cặp
-        pool = pool + pool
-        # Trộn ngẫu nhiên
-        random.shuffle(pool)
-        
-        # 2. Đưa vào ma trận map (0 đại diện cho ô trống đã được xóa)
-        self.matrix = np.array(pool).reshape((self.height, self.width))
-        
-        # Trả về trạng thái ban đầu
-        return self._get_state()
+        # 3. Đưa vào vùng lõi của ma trận state (bỏ phần viền 0 ngoài cùng)
+        pokemon_idx = 0
+        for r in range(1, self.rows + 1):
+            for c in range(1, self.cols + 1):
+                self.state[r][c] = pokemon_pool[pokemon_idx]
+                pokemon_idx += 1
+                
+        # Trả về trạng thái ban đầu của bàn cờ
+        return self.state
+
+    def _check_path_internal(self, p1, p2):
+        """
+        Gọi thuật toán check đường dẫn nội tại của game (do Người 1 phân tích từ mã nguồn gốc).
+        p1, p2 là bộ tọa độ (r1, c1), (r2, c2).
+        Trả về: True nếu nối được (<= 3 đường thẳng), ngược lại False.
+        """
+        # Lưu ý: Phần này bạn import hoặc bê hàm check_match(p1, p2) từ module game gốc sang.
+        # Ví dụ giả định: return game_logic.check_match(self.state, p1, p2)
+        pass
 
     def play_step(self, action):
         """
-        Nhận tọa độ click từ AI, thực thi và trả về (state, reward, done, score)
-        action: tuple (x, y) - tọa độ ô mà AI muốn click
-        """
-        x, y = action
-        reward = self.REWARD_STALL
+        Nhiệm vụ 1 & 3: Nhận tọa độ từ AI, thực thi logic, loại bỏ pygame.event.get() 
+        và trả về bộ 4 biến (state, reward, done, score).
         
-        # Kiểm tra click hợp lệ (nằm trong map và ô đó không trống)
-        if not (0 <= x < self.width and 0 <= y < self.height) or self.matrix[y][x] == 0:
-            return self._get_state(), self.REWARD_WRONG, self.done, self.score
+        @param action: Tuple chứa tọa độ của 2 ô AI muốn chọn: ((r1, c1), (r2, c2))
+        """
+        p1, p2 = action
+        r1, c1 = p1
+        r2, c2 = p2
+        
+        reward = 0
+        done = False
+        
+        # BỎ QUA HOÀN TOÀN pygame.event.get() -> AI truyền action trực tiếp vào đây.
+        
+        # 1. Kiểm tra tính hợp lệ của Action
+        # Không được chọn cùng 1 ô, không chọn ô trống, và 2 ô phải cùng loại Pokemon
+        if p1 == p2 or self.state[r1][c1] == 0 or self.state[r2][c2] == 0 or self.state[r1][c1] != self.state[r2][c2]:
+            reward = -2  # Phạt nặng nếu AI chọn bừa ô không hợp lệ hoặc sai cặp
+            return self.state, reward, done, self.score
 
-        # Nếu chưa chọn ô thứ nhất
-        if self.selected_tile is None:
-            self.selected_tile = (x, y)
-            reward = 0 # Click ô đầu tiên chưa tính điểm phạt/thưởng lớn
+        # 2. Gọi thuật toán kiểm tra đường nối (Nội tại của game)
+        is_valid_path = self._check_path_internal(p1, p2)
+        
+        if is_valid_path:
+            # Nếu nối thành công: Xóa 2 ô trên bàn cờ (biến thành số 0)
+            self.state[r1][c1] = 0
+            self.state[r2][c2] = 0
+            
+            self.score += 10    # Tăng điểm số trong game
+            reward = +10        # Thưởng điểm cho AI
+            
+            # 3. Kiểm tra xem đã phá đảo chưa (Done)
+            # Nếu toàn bộ vùng lõi đều bằng 0 -> Hết sạch Pokemon
+            if np.sum(self.state[1:self.rows+1, 1:self.cols+1]) == 0:
+                reward = +50    # Thưởng lớn khi thắng game
+                done = True
         else:
-            x1, y1 = self.selected_tile
+            # Chọn đúng cặp giống nhau nhưng đường đi bị chặn bởi ô khác
+            reward = -1 
             
-            # Click trùng lại ô cũ
-            if (x1, y1) == (x, y):
-                self.selected_tile = None
-                reward = self.REWARD_WRONG
-            else:
-                # 2. Gọi thuật toán check đường dẫn nội tại của game (đường thẳng, 1 góc vuông, 2 góc vuông)
-                if self.matrix[y1][x1] == self.matrix[y][x] and self._check_path(x1, y1, x, y):
-                    # Nếu nối thành công: Xóa 2 ô khỏi map
-                    self.matrix[y1][x1] = 0
-                    self.matrix[y][x] = 0
-                    reward = self.REWARD_MATCH
-                    self.score += 10
-                    
-                    # Kiểm tra xem đã hết map chưa (Thắng)
-                    if np.all(self.matrix == 0):
-                        reward += self.REWARD_WIN
-                        self.done = True
-                else:
-                    # Chọn sai cặp hoặc không có đường nối
-                    reward = self.REWARD_WRONG
-                
-                # Reset trạng thái chọn sau lượt click thứ 2
-                self.selected_tile = None
-
-        # Trả về bộ 4 biến chuẩn RL
-        return self._get_state(), reward, self.done, self.score
-
-    def _get_state(self):
-        """
-        Trả về trạng thái hiện tại của môi trường dưới dạng ma trận.
-        Có thể flat ra hoặc giữ nguyên để AI CNN xử lý.
-        """
-        # Trả về map hiện tại + ô đang được chọn (nếu có) để AI biết nó đang chọn gì
-        selected_mask = np.zeros_like(self.matrix)
-        if self.selected_tile:
-            x, y = self.selected_tile
-            selected_mask[y][x] = 1
-            
-        return np.stack([self.matrix, selected_mask], axis=-1)
-
-    def _check_path(self, x1, y1, x2, y2):
-        """
-        Hàm nội tại kiểm tra đường đi (Thuật toán tìm đường Pikachu của bạn).
-        Thay thế đoạn này bằng logic tìm đường nối (tối đa 3 đoạn thẳng) sẵn có của bạn.
-        """
-        return True
-
-    def render(self, screen):
-        """
-        Hàm vẽ giao diện (chỉ dùng để xem, KHÔNG dùng để nhận sự kiện)
-        """
-        screen.fill((255, 255, 255))
-        # Logic vẽ các ô pokemon dựa trên self.matrix lên màn hình pygame...
-        pygame.display.flip()
+        # Thêm cơ chế kiểm tra bế tắc (Kịch đường đi): 
+        # Nếu bàn cờ còn hình nhưng không còn cặp nào nối được, cũng kết thúc (done = True, reward = -5)
+        
+        return self.state, reward, done, self.score
