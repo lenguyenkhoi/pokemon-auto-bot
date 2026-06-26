@@ -105,9 +105,7 @@ class PokemonEnv:
         Hàm nội tại kiểm tra đường đi (Thuật toán tìm đường Pikachu của bạn).
         Thay thế đoạn này bằng logic tìm đường nối (tối đa 3 đoạn thẳng) sẵn có của bạn.
         """
-        # Giả lập logic kiểm tra: trả về True nếu thông đường, False nếu bị chặn
-        # BẠN CẦN CHÈN THUẬT TOÁN LOGIC GAME CỦA BẠN VÀO ĐÂY
-        return True 
+        return True
 
     def render(self, screen):
         """
