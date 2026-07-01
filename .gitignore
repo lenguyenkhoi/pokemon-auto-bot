@@ -1,0 +1,6 @@
+# Chặn thư mục pycache
+__pycache__/
+
+# Chặn các file biên dịch khác của Python
+*.py[cod]
+*$py.class
