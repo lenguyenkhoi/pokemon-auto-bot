@@ -17,20 +17,22 @@ BATCH_SIZE = 64
 LR = 0.001
 
 class PikachuAgent:
-    def __init__(self, model, optimizer, criterion):
+    def __init__(self, model, optimizer, criterion, device="cpu"):
         """
         Khởi tạo Agent.
         - model: Mạng CNN do Người số 4 thiết kế trong model.py
         - optimizer: Bộ tối ưu hóa (ví dụ: Adam)
         - criterion: Hàm tính Loss (ví dụ: Mean Squared Error - MSE)
+        - device: Thiết bị chạy PyTorch ('cpu' hoặc 'cuda')
         """
         self.n_games = 0
         self.epsilon = 1.0  # Tỷ lệ đi bừa (khám phá), sẽ giảm dần theo thời gian
         self.gamma = 0.9    # Hệ số chiết khấu (discount factor) cho phần thưởng tương lai
         self.memory = deque(maxlen=MAX_MEMORY)  # Bộ nhớ Replay Memory sử dụng deque
         
-        # Nhận các thành phần Deep Learning từ Người số 4
-        self.model = model
+        # Thiết bị phần cứng
+        self.device = torch.device(device)
+        self.model = model.to(self.device)
         self.optimizer = optimizer
         self.criterion = criterion
 
@@ -45,8 +47,8 @@ class PikachuAgent:
         next_s_dict = extract_state(next_state)
         
         # Chuyển đổi thành Torch Tensor thông qua hàm của Người 3
-        s_tensors = state_to_torch(s_dict)
-        next_s_tensors = state_to_torch(next_s_dict)
+        s_tensors = state_to_torch(s_dict, device=self.device)
+        next_s_tensors = state_to_torch(next_s_dict, device=self.device)
         
         # Tiến hành tối ưu hóa 1 bước đi đơn lẻ
         self._train_step([s_tensors], [action], [reward], [next_s_tensors], [done])
@@ -66,8 +68,8 @@ class PikachuAgent:
         s_dicts = [extract_state(s) for s in states]
         next_s_dicts = [extract_state(ns) for ns in next_states]
         
-        s_tensors = batch_states_to_torch(s_dicts)
-        next_s_tensors = batch_states_to_torch(next_s_dicts)
+        s_tensors = batch_states_to_torch(s_dicts, device=self.device)
+        next_s_tensors = batch_states_to_torch(next_s_dicts, device=self.device)
         
         # Tiến hành huấn luyện trên tập dữ liệu lớn
         self._train_step(s_tensors, actions, rewards, next_s_tensors, dones, is_batch=True)
@@ -76,14 +78,14 @@ class PikachuAgent:
         """Hàm logic tính toán Loss và cập nhật trọng số cho Model của Người 4"""
         # Nếu là batch lớn, lấy thẳng tensor gộp từ Người 3, ngược lại lấy phần tử đơn lẻ
         if is_batch:
-            state_input = states["board_onehot"]  # Đầu vào ma trận dạng One-Hot cho CNN
-            next_state_input = next_states["board_onehot"]
+            state_input = states["board_onehot"].to(self.device)  # Đầu vào ma trận dạng One-Hot cho CNN
+            next_state_input = next_states["board_onehot"].to(self.device)
         else:
-            state_input = states[0]["board_onehot"].unsqueeze(0)
-            next_state_input = next_states[0]["board_onehot"].unsqueeze(0)
+            state_input = states[0]["board_onehot"].unsqueeze(0).to(self.device)
+            next_state_input = next_states[0]["board_onehot"].unsqueeze(0).to(self.device)
             
-        rewards = torch.tensor(rewards, dtype=torch.float32)
-        dones = torch.tensor(dones, dtype=torch.bool)
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
+        dones = torch.tensor(dones, dtype=torch.bool, device=self.device)
         
         # 1. Dự đoán giá trị Q hiện tại từ model của Người 4
         pred = self.model(state_input)
@@ -93,21 +95,22 @@ class PikachuAgent:
         with torch.no_grad():
             next_pred = self.model(next_state_input)
             
+        H, W = state_input.shape[2], state_input.shape[3]
         for idx in range(len(dones)):
-            # Lấy ra chỉ mục số nguyên duy nhất của action (Người 3 định nghĩa cách encode/decode này)
-            # Ở đây giả định model xuất ra điểm cho từng ô hoặc cặp ô cụm phẳng
-            # Để đơn giản, ta tính toán vị trí cập nhật trực tiếp cho action cụ thể
-            # (Phần này sẽ khớp với đầu ra Output Layer mà Người số 4 thiết kế)
-            act_idx = idx  # Tạm thời mapping theo luồng batch
+            r1, c1, r2, c2 = actions[idx]
+            idx1 = r1 * W + c1
+            idx2 = r2 * W + c2
             
             Q_new = rewards[idx]
             if not dones[idx]:
-                Q_new = rewards[idx] + self.gamma * torch.max(next_pred[idx])
+                # Ước lượng max Q(S', A') bằng cách nhân đôi giá trị max cell Q-value
+                Q_new = rewards[idx] + self.gamma * torch.max(next_pred[idx]) * 2.0
                 
-            # Cập nhật mục tiêu học tập cho mạng nơ-ron
-            # Giả định Người 4 xuất ra phân phối điểm số phù hợp với số lượng cặp hành động
-            if act_idx < target.size(1):
-                target[idx][act_idx] = Q_new
+            # Cập nhật mục tiêu học tập cho mạng nơ-ron: chia đều phần chênh lệch cho cả 2 ô của cặp hành động
+            current_q = pred[idx][idx1] + pred[idx][idx2]
+            diff = Q_new - current_q
+            target[idx][idx1] = pred[idx][idx1] + 0.5 * diff
+            target[idx][idx2] = pred[idx][idx2] + 0.5 * diff
             
         # 3. Tính toán độ lỗi (Loss) và tối ưu hóa trọng số
         self.optimizer.zero_grad()
@@ -137,7 +140,7 @@ class PikachuAgent:
         # Hành động Khai thác (Exploitation): Nhìn ma trận và dùng Model suy luận
         else:
             s_dict = extract_state(board_state)
-            s_tensor = state_to_torch(s_dict)["board_onehot"].unsqueeze(0)
+            s_tensor = state_to_torch(s_dict, device=self.device)["board_onehot"].unsqueeze(0)
             
             self.model.eval()
             with torch.no_grad():
@@ -145,13 +148,11 @@ class PikachuAgent:
             self.model.train()
             
             # Phối hợp với Người 3: Bốc ra action có điểm dự đoán tốt nhất nằm trong danh sách valid
-            # (Tránh trường hợp AI dự đoán bừa vào ô trống hoặc ô không nối được)
-            best_action = valid_actions[0]  # Fallback mặc định
-            best_score = -float('inf')
-            
-            # Quét qua các cặp hợp lệ để tìm xem cặp nào có tổng điểm dự đoán cao nhất
-            # Giả định model xuất điểm số tương ứng cho vùng không gian lưới
-            return random.choice(valid_actions) # Đồng bộ nhanh với masking thực tế
+            from utils.state_utils import qvalues_to_action
+            best_action = qvalues_to_action(q_values[0], valid_actions, len(board_state[0]), len(board_state))
+            if best_action is not None:
+                return best_action
+            return random.choice(valid_actions)
 
 # ==============================================================================
 # ĐOẠN MÃ GIẢ LẬP ĐỂ BẠN TEST FILE AGENT MỘT MÌNH (KHÔNG CẦN NGƯỜI 2 VÀ NGƯỜI 4)

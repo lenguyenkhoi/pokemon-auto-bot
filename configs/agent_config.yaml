@@ -1,0 +1,9 @@
+model:
+  input_channels: 101
+  hidden_dim: 256
+  dropout: 0.1
+  activation: relu
+
+environment:
+  board_rows: 9
+  board_cols: 14

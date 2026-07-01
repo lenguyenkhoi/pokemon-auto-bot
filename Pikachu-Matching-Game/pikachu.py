@@ -9,6 +9,40 @@ from datetime import datetime
 import numpy as np
 import scipy.ndimage
 
+# AI Autopilot Configuration
+AUTOPILOT = False
+ai_model = None
+USER = None
+USER_NAME = ""
+
+if "--ai" in sys.argv:
+    AUTOPILOT = True
+    USER = {"Board": [[0]*14 for _ in range(9)], "Score": 0, "Level": 1}
+    USER_NAME = "ai_agent"
+    
+    PARENT_DIR = os.path.dirname(SCRIPT_DIR)
+    if PARENT_DIR not in sys.path:
+        sys.path.insert(0, PARENT_DIR)
+        
+    import yaml
+    import torch
+    from model.model import PokemonModel
+    from utils.state_utils import extract_state, state_to_torch, get_valid_actions, qvalues_to_action
+    
+    # Load config and weights from parent directory
+    with open("../configs/agent_config.yaml", "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+        
+    output_size = 14 * 9
+    ai_model = PokemonModel(config, output_size)
+    model_path = "../weights/best_model.pt"
+    if os.path.exists(model_path):
+        print(f"Loading AI model weights from {model_path}...")
+        ai_model.load(model_path, map_location="cpu")
+    else:
+        print(f"WARNING: Weights {model_path} not found. Running with initial random weights.")
+    ai_model.eval()
+
 """Đặt các cấu hình mặc định"""
 FPS = 60
 WINDOWWIDTH = 1214
@@ -991,6 +1025,10 @@ def runGame():
     else:
         pygame.mixer.music.stop()
 
+    ai_selected_pair = []
+    ai_click_timer = time.time()
+    ai_click_step = 0
+
     while True:
         DISPLAYSURF.blit(randomBG, (0, 0))
         drawBoard(mainBoard)
@@ -1029,6 +1067,39 @@ def runGame():
             drawHint(hint)
 
         mouseClicked = False
+        
+        if AUTOPILOT:
+            if not ai_selected_pair:
+                valid_actions = get_valid_actions(mainBoard, bfs)
+                if valid_actions:
+                    s_dict = extract_state(mainBoard)
+                    s_tensor = state_to_torch(s_dict, device="cpu")["board_onehot"].unsqueeze(0)
+                    with torch.no_grad():
+                        q_values = ai_model(s_tensor)
+                    best_action = qvalues_to_action(q_values[0], valid_actions, BOARDWIDTH, BOARDHEIGHT)
+                    if best_action is None:
+                        best_action = random.choice(valid_actions)
+                    r1, c1, r2, c2 = best_action
+                    ai_selected_pair = [(c1, r1), (c2, r2)]
+                    ai_click_step = 0
+                    ai_click_timer = time.time()
+            
+            if ai_selected_pair:
+                if ai_click_step == 0 and time.time() - ai_click_timer > 0.3:
+                    mousex, mousey = leftTopCoordsOfBox(ai_selected_pair[0][0], ai_selected_pair[0][1])
+                    mousex += BOXSIZE // 2
+                    mousey += BOXSIZE // 2
+                    mouseClicked = True
+                    ai_click_step = 1
+                    ai_click_timer = time.time()
+                elif ai_click_step == 1 and time.time() - ai_click_timer > 0.3:
+                    mousex, mousey = leftTopCoordsOfBox(ai_selected_pair[1][0], ai_selected_pair[1][1])
+                    mousex += BOXSIZE // 2
+                    mousey += BOXSIZE // 2
+                    mouseClicked = True
+                    ai_selected_pair = []
+                    ai_click_timer = time.time()
+
         hint = getHint(mainBoard)
         if not hint:
             resetBoard(mainBoard)
@@ -1490,13 +1561,17 @@ def main():
     LIVESFONT = pygame.font.SysFont('comicsansms', 45)
     
     # Hiển thị màn hình xác thực (đăng nhập/đăng ký)
-    while showMainAuthScreen():
-        continue
+    if not AUTOPILOT:
+        while showMainAuthScreen():
+            continue
 
     # Vòng lặp chính của trò chơi
     while True:
         # Hiển thị màn hình bắt đầu và nhận lựa chọn từ người chơi
-        choice = showStartScreen()
+        if AUTOPILOT:
+            choice = "Newgame"
+        else:
+            choice = showStartScreen()
         
         # Biến cờ để kiểm tra trạng thái chơi
         game_running = True
