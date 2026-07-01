@@ -1,4 +1,9 @@
 import pygame, sys, random, copy, time, collections, os, json
+
+# Ensure working directory is the script directory so relative resource
+# paths like 'Resources/...' resolve correctly when running from project root
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(SCRIPT_DIR)
 from pygame.locals import *
 from datetime import datetime
 import numpy as np
@@ -63,7 +68,7 @@ getPointSound = pygame.mixer.Sound('Resources/sound_effect/victory.mp3')
 WrongSound = pygame.mixer.Sound('Resources/sound_effect/wrong.mp3')
 startScreenSound = pygame.mixer.Sound('Resources/sound_effect/warriors-of-the-night-assemble.wav')
 listMusicBG = ["Resources/BGmusic/" + i for i in os.listdir("Resources/BGmusic")]
-font_path = "Resources\Fonts\Jersey15-Regular.ttf"
+font_path = "Resources/Fonts/Jersey15-Regular.ttf"
 click = pygame.mixer.Sound("Resources/sound_effect/mouse_click.mp3")
 
 """Xử lý đăng kí, đăng nhập tài khoản"""
@@ -236,9 +241,9 @@ def register_account(username, password):
 
 def showRegisterScreen():
     """Màn hình đăng kí"""
-    login_font = pygame.font.Font('Resources\Fonts\Jersey15-Regular.ttf', 50)
-    input_font = pygame.font.Font('Resources\Fonts\Jersey15-Regular.ttf', 40)
-    button_font = pygame.font.Font('Resources\Fonts\Jersey15-Regular.ttf', 45)
+    login_font = pygame.font.Font('Resources/Fonts/Jersey15-Regular.ttf', 50)
+    input_font = pygame.font.Font('Resources/Fonts/Jersey15-Regular.ttf', 40)
+    button_font = pygame.font.Font('Resources/Fonts/Jersey15-Regular.ttf', 45)
     username = ""
     password = ""
     active_field = "username"
