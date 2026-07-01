@@ -1032,6 +1032,7 @@ def runGame():
                 saveGame(mainBoard)
                 pygame.quit()
                 sys.exit()
+            # event.type == MOUSEBUTTONDOWN
             elif event.type == MOUSEBUTTONDOWN:
                 mousex, mousey = event.pos
                 mouseClicked = True
