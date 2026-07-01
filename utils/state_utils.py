@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import copy
 import collections
+import random
 from typing import List, Tuple, Optional, Callable, Dict, Union
 
 import numpy as np
@@ -112,14 +113,18 @@ def board_to_onehot(board: Board, num_classes: int) -> np.ndarray:
 def board_to_tensor(board: Board, num_classes: int, device: str = "cpu") -> "torch.Tensor":
     """Board -> tensor CNN sẵn sàng dùng. Shape (1, num_classes, H, W)."""
     onehot = board_to_onehot(board, num_classes)
-    tensor = torch.tensor(onehot, dtype=torch.float32)
-    return tensor.unsqueeze(0).to(device)
+    if _TORCH_AVAILABLE:
+        tensor = torch.tensor(onehot, dtype=torch.float32)
+        return tensor.unsqueeze(0).to(device)
+    return np.expand_dims(onehot.astype(np.float32), axis=0)
 
 
 def board_to_flat_tensor(board: Board, device: str = "cpu") -> "torch.Tensor":
     """Board -> tensor 1D flatten. Shape (1, H*W). Dùng cho model Linear/MLP."""
     arr = board_to_numpy(board).flatten().astype(np.float32)
-    return torch.tensor(arr).unsqueeze(0).to(device)
+    if _TORCH_AVAILABLE:
+        return torch.tensor(arr).unsqueeze(0).to(device)
+    return np.expand_dims(arr, axis=0)
 
 
 def normalize_board(board: Board, max_type: int) -> np.ndarray:
@@ -193,6 +198,82 @@ def _default_bfs_fn(board: Board, r1: int, c1: int, r2: int, c2: int) -> list:
     mat = board if isinstance(board, np.ndarray) else board_to_numpy(board)
     return [(r1, c1), (r2, c2)] if _bfs_check(mat, r1, c1, r2, c2) else []
 
+def _call_bfs_fn(bfs_fn: Optional[BfsFn], board: Board, r1: int, c1: int, r2: int, c2: int):
+    """Gọi bfs_fn theo 2 interface hỗ trợ: (board, r1, c1, r2, c2) và (r1, c1, r2, c2)."""
+    fn = bfs_fn if bfs_fn is not None else _default_bfs_fn
+    try:
+        return fn(board, r1, c1, r2, c2)
+    except TypeError:
+        return fn(r1, c1, r2, c2)
+
+
+def getRandomizedBoard(
+    board_width: int = DEFAULT_BOARD_WIDTH,
+    board_height: int = DEFAULT_BOARD_HEIGHT,
+    num_same_heroes: int = 4,
+) -> Board:
+    """Tạo board mới với các cặp pokemon ngẫu nhiên, phù hợp cho môi trường Pikachu."""
+    board = [[0 for _ in range(board_width)] for _ in range(board_height)]
+    inner_cells = (board_height - 2) * (board_width - 2)
+    if inner_cells <= 0:
+        return board
+
+    num_types = max(1, inner_cells // max(1, num_same_heroes))
+    usable_cells = num_types * num_same_heroes
+    pool = list(range(1, num_types + 1)) * num_same_heroes
+    random.shuffle(pool)
+    pool = pool[:usable_cells]
+
+    index = 0
+    for r in range(1, board_height - 1):
+        for c in range(1, board_width - 1):
+            if index < usable_cells:
+                board[r][c] = pool[index]
+                index += 1
+    return board
+
+
+def alterBoardWithLevel(board: Board, boxy1: int, boxx1: int, boxy2: int, boxx2: int, level: int) -> Board:
+    """Dịch chuyển các pokemon theo level, đồng bộ với logic trong trò chơi gốc."""
+    board = copy.deepcopy(board)
+    if level <= 1:
+        return board
+
+    if level == 2:
+        for col in {boxx1, boxx2}:
+            values = [board[r][col] for r in range(len(board))]
+            filtered = [value for value in values if value != 0]
+            new_values = filtered + [0] * (len(board) - len(filtered))
+            for r, value in enumerate(new_values):
+                board[r][col] = value
+        return board
+
+    if level == 3:
+        for col in {boxx1, boxx2}:
+            values = [board[r][col] for r in range(len(board))]
+            filtered = [value for value in values if value != 0]
+            new_values = [0] * (len(board) - len(filtered)) + filtered
+            for r, value in enumerate(new_values):
+                board[r][col] = value
+        return board
+
+    if level == 4:
+        for row in {boxy1, boxy2}:
+            values = board[row]
+            filtered = [value for value in values if value != 0]
+            new_values = filtered + [0] * (len(values) - len(filtered))
+            board[row] = new_values
+        return board
+
+    if level == 5:
+        for row in {boxy1, boxy2}:
+            values = board[row]
+            filtered = [value for value in values if value != 0]
+            new_values = [0] * (len(values) - len(filtered)) + filtered
+            board[row] = new_values
+        return board
+
+    return board
 
 # ══════════════════════════════════════════════════════════════════════
 # PHẦN 3 — TÌM ACTION HỢP LỆ (ACTION MASKING)
@@ -232,7 +313,7 @@ def get_valid_actions(board: Board, bfs_fn: Optional[BfsFn] = None) -> List[Acti
             for j in range(i + 1, n):
                 r1, c1 = positions[i]
                 r2, c2 = positions[j]
-                if fn(board, r1, c1, r2, c2):
+                if _call_bfs_fn(fn, board, r1, c1, r2, c2):
                     valid.append((r1, c1, r2, c2))
 
     return valid
@@ -415,7 +496,7 @@ def apply_action(board: Board, action: Action, bfs_fn: Optional[BfsFn] = None) -
     new_board = copy.deepcopy(board)
     fn = bfs_fn if bfs_fn is not None else _default_bfs_fn
 
-    if not fn(new_board, r1, c1, r2, c2):
+    if not _call_bfs_fn(fn, new_board, r1, c1, r2, c2):
         return None
 
     new_board[r1][c1] = 0
