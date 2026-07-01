@@ -157,7 +157,7 @@ def train():
             best_score = env.score
             weights_dir = os.path.join(ROOT_DIR, "weights")
             os.makedirs(weights_dir, exist_ok=True)
-            model.save(os.path.join(weights_dir, "best_model.pt"))
+            model.save(os.path.join(weights_dir, "best_model_3.pt"))
             print(f"--> Da luu best model moi tai weights/best_model.pt voi Score: {best_score}")
             
     # Tat che do ve truc tiep, luu do thi cuoi cung
