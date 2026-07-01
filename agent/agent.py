@@ -120,24 +120,38 @@ class PikachuAgent:
 
     def get_action(self, board_state, env_bfs_fn):
         """
-        Cơ chế Epsilon-Greedy: AI quyết định đi bừa hay dùng suy luận từ model.
+        Cơ chế Epsilon-Greedy KHÔNG dùng Action Masking (AI tự tìm đường và học luật chơi).
         - board_state: Ma trận game hiện tại
-        - env_bfs_fn: Hàm check bước đi BFS của Người số 2 truyền sang
+        - env_bfs_fn: Hàm check bước đi BFS của game
         """
-        # Sử dụng hàm tìm nước đi hợp lệ chuẩn 100% của Người số 3
+        # Kiểm tra nếu bảng không còn nước đi nào thực sự hợp lệ (deadlock), trả về None để tự reset
         valid_actions = get_valid_actions(board_state, env_bfs_fn)
-        
         if not valid_actions:
-            return None  # Không còn nước đi, trả về None để Env tự động reset
+            return None
 
         # Giảm dần epsilon qua từng ván game để AI bớt đi bừa và thông minh dần lên
         self.epsilon = max(0.01, 80 - self.n_games) / 80
         
-        # Hành động Khám phá (Exploration): Đi ngẫu nhiên một nước đi đúng luật
+        H = len(board_state)
+        W = len(board_state[0])
+        
+        # Chỉ lấy các ô bên trong chứa Pokémon thực tế (bỏ viền ngoài và các ô đã trống bằng 0)
+        inner_indices = [
+            r * W + c for r in range(1, H - 1) for c in range(1, W - 1)
+            if board_state[r][c] != 0
+        ]
+
+        # Hành động Khám phá (Exploration): Chọn bừa 2 ô chứa Pokémon khác nhau
         if random.random() < self.epsilon:
-            return random.choice(valid_actions)
+            cell1 = random.choice(inner_indices)
+            cell2 = random.choice(inner_indices)
+            while cell1 == cell2:
+                cell2 = random.choice(inner_indices)
+            r1, c1 = divmod(cell1, W)
+            r2, c2 = divmod(cell2, W)
+            return (r1, c1, r2, c2)
             
-        # Hành động Khai thác (Exploitation): Nhìn ma trận và dùng Model suy luận
+        # Hành động Khai thác (Exploitation): Dùng Model chọn 2 ô chứa Pokémon có Q-value cao nhất
         else:
             s_dict = extract_state(board_state)
             s_tensor = state_to_torch(s_dict, device=self.device)["board_onehot"].unsqueeze(0)
@@ -147,12 +161,20 @@ class PikachuAgent:
                 q_values = self.model(s_tensor)
             self.model.train()
             
-            # Phối hợp với Người 3: Bốc ra action có điểm dự đoán tốt nhất nằm trong danh sách valid
-            from utils.state_utils import qvalues_to_action
-            best_action = qvalues_to_action(q_values[0], valid_actions, len(board_state[0]), len(board_state))
-            if best_action is not None:
-                return best_action
-            return random.choice(valid_actions)
+            # Gán Q-values của các ô viền ngoài và ô đã trống về âm vô cực
+            q_masked = q_values[0].clone()
+            for idx in range(H * W):
+                r, c = divmod(idx, W)
+                if r == 0 or r == H - 1 or c == 0 or c == W - 1 or board_state[r][c] == 0:
+                    q_masked[idx] = -float('inf')
+            
+            # Chọn 2 ô có giá trị Q-value dự đoán cao nhất
+            top2_indices = torch.topk(q_masked, 2).indices.cpu().numpy()
+            idx1, idx2 = top2_indices[0], top2_indices[1]
+            
+            r1, c1 = divmod(idx1, W)
+            r2, c2 = divmod(idx2, W)
+            return (r1, c1, r2, c2)
 
 # ==============================================================================
 # ĐOẠN MÃ GIẢ LẬP ĐỂ BẠN TEST FILE AGENT MỘT MÌNH (KHÔNG CẦN NGƯỜI 2 VÀ NGƯỜI 4)

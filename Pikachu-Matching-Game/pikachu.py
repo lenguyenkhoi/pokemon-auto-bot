@@ -1076,10 +1076,20 @@ def runGame():
                     s_tensor = state_to_torch(s_dict, device="cpu")["board_onehot"].unsqueeze(0)
                     with torch.no_grad():
                         q_values = ai_model(s_tensor)
-                    best_action = qvalues_to_action(q_values[0], valid_actions, BOARDWIDTH, BOARDHEIGHT)
-                    if best_action is None:
-                        best_action = random.choice(valid_actions)
-                    r1, c1, r2, c2 = best_action
+                    
+                    # Gán Q-values của các ô viền ngoài và các ô trống về âm vô cực để model không chọn trúng
+                    q_masked = q_values[0].clone()
+                    for idx in range(BOARDWIDTH * BOARDHEIGHT):
+                        r, c = divmod(idx, BOARDWIDTH)
+                        if r == 0 or r == BOARDHEIGHT - 1 or c == 0 or c == BOARDWIDTH - 1 or mainBoard[r][c] == 0:
+                            q_masked[idx] = -float('inf')
+                    
+                    # Chọn 2 ô có Q-value cao nhất từ các ô hợp lệ bên trong
+                    top2_indices = torch.topk(q_masked, 2).indices.cpu().numpy()
+                    idx1, idx2 = top2_indices[0], top2_indices[1]
+                    r1, c1 = divmod(idx1, BOARDWIDTH)
+                    r2, c2 = divmod(idx2, BOARDWIDTH)
+                    
                     ai_selected_pair = [(c1, r1), (c2, r2)]
                     ai_click_step = 0
                     ai_click_timer = time.time()
@@ -1617,3 +1627,147 @@ def main():
 if __name__ == '__main__':
     while True:
         main()  # Chạy lại hàm main khi người chơi nhấn "Play Again"
+
+
+# ==============================================================================
+# PIPELINE KHỞI TẠO MÔI TRƯỜNG DÀNH CHO AI AGENT TRAINING TRỰC TIẾP TRÊN GAME THẬT
+# ==============================================================================
+class PikachuEnv:
+    def __init__(self, board_width=14, board_height=9, level=1, render_mode=False):
+        """
+        Khởi tạo môi trường game Pikachu trực tiếp từ code đồ họa của game.
+        """
+        self.BOARDWIDTH = board_width
+        self.BOARDHEIGHT = board_height
+        self.LEVEL = level
+        self.render_mode = render_mode
+        self.BOXSIZE = BOXSIZE
+        self.WINDOWWIDTH = WINDOWWIDTH
+        self.WINDOWHEIGHT = WINDOWHEIGHT
+        
+        # Khởi tạo Pygame hiển thị nếu chưa được gọi
+        if not pygame.get_init():
+            pygame.init()
+        if not pygame.mixer.get_init():
+            pygame.mixer.init()
+            
+        global DISPLAYSURF, BASICFONT, LIVESFONT, font, title_font
+        if 'DISPLAYSURF' not in globals() or DISPLAYSURF is None:
+            DISPLAYSURF = pygame.display.set_mode((self.WINDOWWIDTH, self.WINDOWHEIGHT))
+            pygame.display.set_caption('Pikachu AI Environment')
+            
+        font = pygame.font.Font(pygame.font.match_font('arial'), 32)
+        title_font = pygame.font.Font(pygame.font.match_font('arial'), 50)
+        BASICFONT = pygame.font.SysFont('pixel', 40)
+        LIVESFONT = pygame.font.SysFont('comicsansms', 45)
+
+        self.reset()
+
+    def reset(self):
+        """Khởi động lại ván game mới"""
+        global LEVEL, SCORE, mainBoard
+        LEVEL = self.LEVEL
+        SCORE = 0
+        self.mainBoard = getRandomizedBoard()
+        mainBoard = self.mainBoard
+        self.score = 0
+        self.frame_iteration = 0
+        self.game_over = False
+        return np.array(self.mainBoard, dtype=np.int32)
+
+    def play_step(self, action):
+        """
+        AI thực hiện một bước đi: click ô thứ nhất -> click ô thứ hai -> ăn/lỗi.
+        """
+        global SCORE
+        self.frame_iteration += 1
+        reward = 0
+        
+        # Đề phòng deadlock hoặc vòng lặp vô hạn
+        max_frames = (self.BOARDWIDTH * self.BOARDHEIGHT) * 4
+        if self.frame_iteration > max_frames:
+            self.game_over = True
+            reward = -10
+            return np.array(self.mainBoard, dtype=np.int32), reward, self.game_over, self.score
+
+        r1, c1, r2, c2 = action
+
+        # Kiểm tra giới hạn
+        if not (0 <= r1 < self.BOARDHEIGHT and 0 <= c1 < self.BOARDWIDTH and
+                0 <= r2 < self.BOARDHEIGHT and 0 <= c2 < self.BOARDWIDTH):
+            reward = -1
+            return np.array(self.mainBoard, dtype=np.int32), reward, self.game_over, self.score
+
+        # Thực thi BFS kiểm tra đường nối của game gốc
+        path = bfs(self.mainBoard, r1, c1, r2, c2)
+        if (self.mainBoard[r1][c1] != 0 and 
+            self.mainBoard[r2][c2] != 0 and 
+            (r1, c1) != (r2, c2) and 
+            path):
+            
+            # GIẢ LẬP THAO TÁC HÌNH ẢNH:
+            # 1. Vẽ highlight click ô thứ 1
+            if self.render_mode:
+                DISPLAYSURF.blit(BG, (0, 0))
+                drawBoard(self.mainBoard)
+                drawClickedBox(self.mainBoard, [(c1, r1)])
+                display_score(self.score)
+                pygame.display.update()
+                pygame.time.wait(100)
+                
+                # 2. Vẽ highlight click ô thứ 2
+                drawClickedBox(self.mainBoard, [(c1, r1), (c2, r2)])
+                pygame.display.update()
+                pygame.time.wait(100)
+                
+                # 3. Vẽ đường nối zic-zac
+                drawPath(self.mainBoard, path)
+                pygame.display.update()
+                pygame.time.wait(150)
+            
+            # Xóa 2 ô trên bảng
+            self.mainBoard[r1][c1] = 0
+            self.mainBoard[r2][c2] = 0
+            
+            # Dịch chuyển ô theo Level
+            self.mainBoard = alterBoardWithLevel(self.mainBoard, r1, c1, r2, c2, self.LEVEL)
+            
+            self.score += 10
+            SCORE = self.score
+            reward = 20
+            self.frame_iteration = 0
+            
+            if isGameComplete(self.mainBoard):
+                self.game_over = True
+                reward = 50
+        else:
+            # Click sai: vẽ highlight đỏ báo lỗi
+            if self.render_mode:
+                DISPLAYSURF.blit(BG, (0, 0))
+                drawBoard(self.mainBoard)
+                drawHighlightBox(self.mainBoard, c1, r1, color=RED)
+                drawHighlightBox(self.mainBoard, c2, r2, color=RED)
+                display_score(self.score)
+                pygame.display.update()
+                pygame.time.wait(100)
+            reward = -1
+
+        if self.render_mode:
+            self.render()
+
+        return np.array(self.mainBoard, dtype=np.int32), reward, self.game_over, self.score
+
+    def render(self):
+        """Vẽ lại bảng đồ họa thật của game"""
+        DISPLAYSURF.blit(BG, (0, 0))
+        drawBoard(self.mainBoard)
+        display_score(self.score)
+        
+        # Vẽ thông số huấn luyện đè lên màn hình
+        font_stat = pygame.font.SysFont('arial', 30)
+        lbl_ep = font_stat.render(f"AI Training Steps: {self.frame_iteration}", True, YELLOW)
+        DISPLAYSURF.blit(lbl_ep, (20, 20))
+        pygame.display.update()
+        
+    def bfs(self, board, r1, c1, r2, c2):
+        return bfs(board, r1, c1, r2, c2)
