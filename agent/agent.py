@@ -1,3 +1,4 @@
+import copy
 import torch
 import random
 import numpy as np
@@ -29,10 +30,16 @@ class PikachuAgent:
         self.epsilon = 1.0  # Tỷ lệ đi bừa (khám phá), sẽ giảm dần theo thời gian
         self.gamma = 0.9    # Hệ số chiết khấu (discount factor) cho phần thưởng tương lai
         self.memory = deque(maxlen=MAX_MEMORY)  # Bộ nhớ Replay Memory sử dụng deque
+        self.training_steps = 0
+        self.target_update_frequency = 50
+        self.last_board_count = None
         
         # Thiết bị phần cứng
         self.device = torch.device(device)
         self.model = model.to(self.device)
+        self.target_model = copy.deepcopy(model).to(self.device)
+        self.target_model.load_state_dict(self.model.state_dict())
+        self.target_model.eval()
         self.optimizer = optimizer
         self.criterion = criterion
 
@@ -40,18 +47,35 @@ class PikachuAgent:
         """Lưu trữ trải nghiệm (S, A, R, S', done) vào bộ nhớ để học sau"""
         self.memory.append((state, action, reward, next_state, done))
 
+    def _reward_from_transition(self, state, action, reward, next_state, done):
+        """Tạo reward được làm giàu để agent học được mục tiêu clear board."""
+        board_before = np.array(state, dtype=np.int32)
+        board_after = np.array(next_state, dtype=np.int32)
+
+        remaining_before = np.count_nonzero(board_before)
+        remaining_after = np.count_nonzero(board_after)
+        cleared = remaining_before - remaining_after
+
+        shaped_reward = float(reward)
+        if cleared > 0:
+            shaped_reward += 10.0 * cleared
+        if remaining_after == 0:
+            shaped_reward += 100.0
+        if done:
+            shaped_reward += 25.0
+        if reward < 0:
+            shaped_reward -= 8.0
+        return shaped_reward
+
     def train_short_memory(self, state, action, reward, next_state, done):
         """Học ngay lập tức sau mỗi lượt bấm (Single step training)"""
-        # Trích xuất state thô thành dict định dạng numpy chuẩn của Người 3
+        shaped_reward = self._reward_from_transition(state, action, reward, next_state, done)
+
         s_dict = extract_state(state)
         next_s_dict = extract_state(next_state)
-        
-        # Chuyển đổi thành Torch Tensor thông qua hàm của Người 3
         s_tensors = state_to_torch(s_dict, device=self.device)
         next_s_tensors = state_to_torch(next_s_dict, device=self.device)
-        
-        # Tiến hành tối ưu hóa 1 bước đi đơn lẻ
-        self._train_step([s_tensors], [action], [reward], [next_s_tensors], [done])
+        self._train_step([s_tensors], [action], [shaped_reward], [next_s_tensors], [done])
 
     def train_long_memory(self):
         """Học từ quá khứ sau khi kết thúc một ván game bằng cách bốc ngẫu nhiên một Batch"""
@@ -64,59 +88,60 @@ class PikachuAgent:
         # Phân tách dữ liệu từ mini_batch
         states, actions, rewards, next_states, dones = zip(*mini_batch)
         
-        # Sử dụng hàm batch_states_to_torch rất mạnh của Người 3 để gom cụm tensor hàng loạt
         s_dicts = [extract_state(s) for s in states]
         next_s_dicts = [extract_state(ns) for ns in next_states]
-        
         s_tensors = batch_states_to_torch(s_dicts, device=self.device)
         next_s_tensors = batch_states_to_torch(next_s_dicts, device=self.device)
-        
-        # Tiến hành huấn luyện trên tập dữ liệu lớn
-        self._train_step(s_tensors, actions, rewards, next_s_tensors, dones, is_batch=True)
+
+        shaped_rewards = [self._reward_from_transition(s, a, r, ns, d) for s, a, r, ns, d in zip(states, actions, rewards, next_states, dones)]
+        self._train_step(s_tensors, actions, shaped_rewards, next_s_tensors, dones, is_batch=True)
 
     def _train_step(self, states, actions, rewards, next_states, dones, is_batch=False):
-        """Hàm logic tính toán Loss và cập nhật trọng số cho Model của Người 4"""
-        # Nếu là batch lớn, lấy thẳng tensor gộp từ Người 3, ngược lại lấy phần tử đơn lẻ
+        """Hàm logic huấn luyện DQN-style dùng target network để học từ reward."""
         if is_batch:
-            state_input = states["board_onehot"].to(self.device)  # Đầu vào ma trận dạng One-Hot cho CNN
+            state_input = states["board_onehot"].to(self.device)
             next_state_input = next_states["board_onehot"].to(self.device)
         else:
             state_input = states[0]["board_onehot"].unsqueeze(0).to(self.device)
             next_state_input = next_states[0]["board_onehot"].unsqueeze(0).to(self.device)
-            
+
         rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
         dones = torch.tensor(dones, dtype=torch.bool, device=self.device)
-        
-        # 1. Dự đoán giá trị Q hiện tại từ model của Người 4
+
+        self.model.train()
         pred = self.model(state_input)
-        target = pred.clone()
-        
-        # 2. Tính toán giá trị Q mục tiêu dựa trên công thức Bellman: Q_new = R + gamma * max(Q(S', A'))
+        target = pred.detach().clone()
+
         with torch.no_grad():
-            next_pred = self.model(next_state_input)
-            
+            next_pred = self.target_model(next_state_input)
+
         H, W = state_input.shape[2], state_input.shape[3]
-        for idx in range(len(dones)):
+        batch_size = len(dones)
+        for idx in range(batch_size):
             r1, c1, r2, c2 = actions[idx]
             idx1 = r1 * W + c1
             idx2 = r2 * W + c2
-            
-            Q_new = rewards[idx]
-            if not dones[idx]:
-                # Ước lượng max Q(S', A') bằng cách nhân đôi giá trị max cell Q-value
-                Q_new = rewards[idx] + self.gamma * torch.max(next_pred[idx]) * 2.0
-                
-            # Cập nhật mục tiêu học tập cho mạng nơ-ron: chia đều phần chênh lệch cho cả 2 ô của cặp hành động
-            current_q = pred[idx][idx1] + pred[idx][idx2]
-            diff = Q_new - current_q
-            target[idx][idx1] = pred[idx][idx1] + 0.5 * diff
-            target[idx][idx2] = pred[idx][idx2] + 0.5 * diff
-            
-        # 3. Tính toán độ lỗi (Loss) và tối ưu hóa trọng số
+
+            q_target = rewards[idx].item()
+            if not dones[idx].item():
+                q_target += self.gamma * torch.max(next_pred[idx]).item()
+
+            target[idx, idx1] = q_target
+            target[idx, idx2] = q_target
+
         self.optimizer.zero_grad()
-        loss = self.criterion(target, pred)
+        loss = self.criterion(pred, target)
         loss.backward()
         self.optimizer.step()
+
+        self.training_steps += 1
+        if self.training_steps % self.target_update_frequency == 0:
+            self.update_target_network()
+
+    def update_target_network(self):
+        """Sao chép trọng số từ model sang target model."""
+        self.target_model.load_state_dict(self.model.state_dict())
+        self.target_model.eval()
 
     def get_action(self, board_state, env_bfs_fn):
         """
@@ -124,57 +149,58 @@ class PikachuAgent:
         - board_state: Ma trận game hiện tại
         - env_bfs_fn: Hàm check bước đi BFS của game
         """
-        # Kiểm tra nếu bảng không còn nước đi nào thực sự hợp lệ (deadlock), trả về None để tự reset
-        valid_actions = get_valid_actions(board_state, env_bfs_fn)
-        if not valid_actions:
-            return None
-
-        # Giảm dần epsilon qua từng ván game để AI bớt đi bừa và thông minh dần lên
+        # Giảm dần epsilon qua từng ván game để AI bớt đi bừa và thông minh dần lên.
         self.epsilon = max(0.01, 80 - self.n_games) / 80
-        
+
         H = len(board_state)
         W = len(board_state[0])
-        
-        # Chỉ lấy các ô bên trong chứa Pokémon thực tế (bỏ viền ngoài và các ô đã trống bằng 0)
-        inner_indices = [
-            r * W + c for r in range(1, H - 1) for c in range(1, W - 1)
-            if board_state[r][c] != 0
+        inner_positions = [
+            (r, c) for r in range(1, H - 1) for c in range(1, W - 1) if board_state[r][c] != 0
         ]
 
-        # Hành động Khám phá (Exploration): Chọn bừa 2 ô chứa Pokémon khác nhau
+        # Exploration: thử một cặp ngẫu nhiên, dù có thể là sai, để học từ sai lầm.
         if random.random() < self.epsilon:
-            cell1 = random.choice(inner_indices)
-            cell2 = random.choice(inner_indices)
-            while cell1 == cell2:
-                cell2 = random.choice(inner_indices)
-            r1, c1 = divmod(cell1, W)
-            r2, c2 = divmod(cell2, W)
+            if not inner_positions:
+                return None
+            r1, c1 = random.choice(inner_positions)
+            r2, c2 = random.choice(inner_positions)
+            while (r1, c1) == (r2, c2):
+                r2, c2 = random.choice(inner_positions)
             return (r1, c1, r2, c2)
-            
-        # Hành động Khai thác (Exploitation): Dùng Model chọn 2 ô chứa Pokémon có Q-value cao nhất
-        else:
-            s_dict = extract_state(board_state)
-            s_tensor = state_to_torch(s_dict, device=self.device)["board_onehot"].unsqueeze(0)
-            
-            self.model.eval()
-            with torch.no_grad():
-                q_values = self.model(s_tensor)
-            self.model.train()
-            
-            # Gán Q-values của các ô viền ngoài và ô đã trống về âm vô cực
-            q_masked = q_values[0].clone()
-            for idx in range(H * W):
-                r, c = divmod(idx, W)
-                if r == 0 or r == H - 1 or c == 0 or c == W - 1 or board_state[r][c] == 0:
-                    q_masked[idx] = -float('inf')
-            
-            # Chọn 2 ô có giá trị Q-value dự đoán cao nhất
-            top2_indices = torch.topk(q_masked, 2).indices.cpu().numpy()
-            idx1, idx2 = top2_indices[0], top2_indices[1]
-            
-            r1, c1 = divmod(idx1, W)
-            r2, c2 = divmod(idx2, W)
+
+        # Exploitation: chọn action mà model tin là tốt nhất.
+        s_dict = extract_state(board_state)
+        s_tensor = state_to_torch(s_dict, device=self.device)["board_onehot"].unsqueeze(0)
+
+        self.model.eval()
+        with torch.no_grad():
+            q_values = self.model(s_tensor)
+        self.model.train()
+
+        q_flat = q_values[0].reshape(-1)
+        best_action = None
+        best_score = -float('inf')
+
+        for r1, c1 in inner_positions:
+            for r2, c2 in inner_positions:
+                if (r1, c1) == (r2, c2):
+                    continue
+                idx1 = r1 * W + c1
+                idx2 = r2 * W + c2
+                action_score = float(q_flat[idx1].item()) + float(q_flat[idx2].item())
+                if action_score > best_score:
+                    best_score = action_score
+                    best_action = (r1, c1, r2, c2)
+
+        if best_action is not None:
+            return best_action
+
+        if inner_positions:
+            r1, c1 = inner_positions[0]
+            r2, c2 = inner_positions[1] if len(inner_positions) > 1 else inner_positions[0]
             return (r1, c1, r2, c2)
+
+        return None
 
 # ==============================================================================
 # ĐOẠN MÃ GIẢ LẬP ĐỂ BẠN TEST FILE AGENT MỘT MÌNH (KHÔNG CẦN NGƯỜI 2 VÀ NGƯỜI 4)

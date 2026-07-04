@@ -23,6 +23,8 @@ sys.path.insert(0, ROOT)
 
 import numpy as np
 import pytest
+import torch
+from agent.agent import PikachuAgent
 from utils.state_utils import (
     board_to_numpy, board_to_onehot, board_to_tensor,
     board_to_flat_tensor, normalize_board, get_state_info,
@@ -196,6 +198,36 @@ class TestGetValidActions:
 
     def test_get_one_valid_action_empty_board(self):
         assert get_one_valid_action(EMPTY_BOARD, fake_bfs) is None
+
+
+def test_agent_can_choose_non_valid_pair_when_model_prefers_it(monkeypatch):
+    class DummyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x):
+            out = torch.full((x.size(0), 14 * 9), -1.0)
+            out[0, 1 * 14 + 1] = 100.0
+            out[0, 1 * 14 + 3] = 100.0
+            return out
+
+    board = [[0] * 14 for _ in range(9)]
+    board[1][1] = 1
+    board[1][2] = 1
+    board[1][3] = 2
+
+    agent = PikachuAgent(
+        model=DummyModel(),
+        optimizer=torch.optim.Adam([torch.nn.Parameter(torch.zeros(1))]),
+        criterion=torch.nn.MSELoss(),
+        device="cpu",
+    )
+    agent.n_games = 1000
+    monkeypatch.setattr("random.random", lambda: 1.0)
+
+    action = agent.get_action(board, lambda *args, **kwargs: [])
+
+    assert action == (1, 1, 1, 3)
 
 
 class TestActionEncoding:
