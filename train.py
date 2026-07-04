@@ -20,7 +20,8 @@ def load_config():
         return yaml.safe_load(f)
 
 def plot_live(scores, mean_scores, epsilons, fig, ax1, ax2):
-    """Cap nhat bieu do truc quan thoi gian thuc (Live Plotting)"""
+    """Cap nhat bieu do truc quan thoi gian thuc 
+    (Live Plotting)"""
     ax1.clear()
     ax2.clear()
     

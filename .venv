@@ -1,0 +1,7 @@
+numpy
+pygame-ce
+scipy
+pyyaml
+matplotlib
+torch
+pytest
