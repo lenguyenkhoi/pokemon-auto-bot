@@ -1,6 +1,6 @@
 # Pokemon Auto-Bot
 
-A Deep Q-Learning agent that learns to play the [Pikachu Matching Game](Pikachu-Matching-Game/README.md) — an Onet/Pikachu-style tile-matching game built with Pygame — and can then take over and play the real game live, driven by mouse clicks.
+A Deep Q-Learning agent that learns to play the [Pikachu Matching Game](Pikachu-Matching-Game/README.md) - an Onet/Pikachu-style tile-matching game built with Pygame - and can then take over and play the real game live, driven by mouse clicks.
 
 ## How it works
 
@@ -9,7 +9,7 @@ A Deep Q-Learning agent that learns to play the [Pikachu Matching Game](Pikachu-
 | Environment | `Pikachu-Matching-Game/pikachu.py` | Exposes `PikachuEnv` (`reset()` / `play_step(action)`), wrapping the actual game so it can be driven programmatically. The board is a `9 x 14` grid (`configs/agent_config.yaml`); each cell is `0` (empty) or a Pokémon type ID. |
 | State | `utils/state_utils.py` | Converts the raw board into one-hot tensors for the CNN, finds every currently valid move via BFS (mirroring the game's own connect-with-at-most-2-turns rule), and applies reward shaping. |
 | Model | `model/model.py` | `PokemonModel`, a small CNN that takes the one-hot board and predicts a Q-value per cell; `QTrainer` implements the Bellman update against a target network. |
-| Agent | `agent/agent.py` | `PikachuAgent` — epsilon-greedy action selection **with action masking**, so only legal pairs (per BFS) are ever considered. Keeps a replay buffer and trains on both single steps (short memory) and sampled batches (long memory). |
+| Agent | `agent/agent.py` | `PikachuAgent` - epsilon-greedy action selection **with action masking**, so only legal pairs (per BFS) are ever considered. Keeps a replay buffer and trains on both single steps (short memory) and sampled batches (long memory). |
 | Training | `train.py` | Runs episodes against the real environment, live-plots score/epsilon with matplotlib, and checkpoints the best-scoring model to `weights/best_model.pt`. |
 | Demo | `demo.py` | Launches the game with `--ai`, which loads the trained weights and lets the agent play live in the Pygame window. |
 
