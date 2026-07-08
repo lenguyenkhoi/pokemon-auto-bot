@@ -1257,7 +1257,8 @@ def drawBoard(board):
                 DISPLAYSURF.blit(a[board[boxy][boxx]], boxRect)
 
     # --- Bước 3: Vẽ đường lưới LÊN TRÊN icon (luôn hiển thị) ---
-    line_surf = pygame.Surface((inner_w, inner_h), pygame.SRCALPHA)
+    # +1 để đường viền cuối (x=inner_w, y=inner_h) không bị cắt mất
+    line_surf = pygame.Surface((inner_w + 1, inner_h + 1), pygame.SRCALPHA)
     line_color = (80, 110, 200, 160)
     for c in range(cols + 1):
         x = c * BOXSIZE
