@@ -6,10 +6,11 @@ from collections import deque
 
 # Import các hằng số và hàm xử lý Action Masking từ Người số 3 gửi
 from utils.state_utils import (
-    get_valid_actions, 
-    extract_state, 
-    state_to_torch, 
-    batch_states_to_torch
+    get_valid_actions,
+    extract_state,
+    state_to_torch,
+    batch_states_to_torch,
+    qvalues_to_action,
 )
 
 # Cấu hình hằng số cho Agent
@@ -145,30 +146,24 @@ class PikachuAgent:
 
     def get_action(self, board_state, env_bfs_fn):
         """
-        Cơ chế Epsilon-Greedy KHÔNG dùng Action Masking (AI tự tìm đường và học luật chơi).
+        Cơ chế Epsilon-Greedy CÓ Action Masking: chỉ xét những cặp ô thực sự
+        nối được theo BFS thật của game (luật chơi được lập trình cứng), AI chỉ
+        cần học cách chọn cặp nào tốt nhất trong số các nước đi hợp lệ đó.
         - board_state: Ma trận game hiện tại
         - env_bfs_fn: Hàm check bước đi BFS của game
         """
         # Giảm dần epsilon qua từng ván game để AI bớt đi bừa và thông minh dần lên.
         self.epsilon = max(0.01, 80 - self.n_games) / 80
 
-        H = len(board_state)
-        W = len(board_state[0])
-        inner_positions = [
-            (r, c) for r in range(1, H - 1) for c in range(1, W - 1) if board_state[r][c] != 0
-        ]
+        valid_actions = get_valid_actions(board_state, env_bfs_fn)
+        if not valid_actions:
+            return None
 
-        # Exploration: thử một cặp ngẫu nhiên, dù có thể là sai, để học từ sai lầm.
+        # Exploration: thử một cặp hợp lệ ngẫu nhiên.
         if random.random() < self.epsilon:
-            if not inner_positions:
-                return None
-            r1, c1 = random.choice(inner_positions)
-            r2, c2 = random.choice(inner_positions)
-            while (r1, c1) == (r2, c2):
-                r2, c2 = random.choice(inner_positions)
-            return (r1, c1, r2, c2)
+            return random.choice(valid_actions)
 
-        # Exploitation: chọn action mà model tin là tốt nhất.
+        # Exploitation: chọn cặp hợp lệ mà model tin là tốt nhất.
         s_dict = extract_state(board_state)
         s_tensor = state_to_torch(s_dict, device=self.device)["board_onehot"].unsqueeze(0)
 
@@ -178,33 +173,11 @@ class PikachuAgent:
         self.model.train()
 
         q_flat = q_values[0].reshape(-1)
-        best_action = None
-        best_score = -float('inf')
+        H, W = len(board_state), len(board_state[0])
+        best_action = qvalues_to_action(q_flat, valid_actions, board_width=W, board_height=H)
 
-        for r1, c1 in inner_positions:
-            for r2, c2 in inner_positions:
-                if (r1, c1) == (r2, c2):
-                    continue
-                idx1 = r1 * W + c1
-                idx2 = r2 * W + c2
-                action_score = float(q_flat[idx1].item()) + float(q_flat[idx2].item())
-                if action_score > best_score:
-                    best_score = action_score
-                    best_action = (r1, c1, r2, c2)
+        return best_action if best_action is not None else valid_actions[0]
 
-        if best_action is not None:
-            return best_action
-
-        if inner_positions:
-            r1, c1 = inner_positions[0]
-            r2, c2 = inner_positions[1] if len(inner_positions) > 1 else inner_positions[0]
-            return (r1, c1, r2, c2)
-
-        return None
-
-# ==============================================================================
-# ĐOẠN MÃ GIẢ LẬP ĐỂ BẠN TEST FILE AGENT MỘT MÌNH (KHÔNG CẦN NGƯỜI 2 VÀ NGƯỜI 4)
-# ==============================================================================
 if __name__ == '__main__':
     print("--- KHỞI TẠO TEST MÔI TRƯỜNG AGENT OFFLINE ---")
     
@@ -237,4 +210,3 @@ if __name__ == '__main__':
     
     print("Thử nghiệm hàm train_long_memory...")
     agent.train_long_memory()
-    print("--- AGENT ĐÃ SẴN SÀNG CHỜ RÁP NỐI VỚI CẢ NHÓM! ---")

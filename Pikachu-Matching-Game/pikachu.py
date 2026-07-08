@@ -1076,20 +1076,17 @@ def runGame():
                     s_tensor = state_to_torch(s_dict, device="cpu")["board_onehot"].unsqueeze(0)
                     with torch.no_grad():
                         q_values = ai_model(s_tensor)
-                    
-                    # Gán Q-values của các ô viền ngoài và các ô trống về âm vô cực để model không chọn trúng
-                    q_masked = q_values[0].clone()
-                    for idx in range(BOARDWIDTH * BOARDHEIGHT):
-                        r, c = divmod(idx, BOARDWIDTH)
-                        if r == 0 or r == BOARDHEIGHT - 1 or c == 0 or c == BOARDWIDTH - 1 or mainBoard[r][c] == 0:
-                            q_masked[idx] = -float('inf')
-                    
-                    # Chọn 2 ô có Q-value cao nhất từ các ô hợp lệ bên trong
-                    top2_indices = torch.topk(q_masked, 2).indices.cpu().numpy()
-                    idx1, idx2 = top2_indices[0], top2_indices[1]
-                    r1, c1 = divmod(idx1, BOARDWIDTH)
-                    r2, c2 = divmod(idx2, BOARDWIDTH)
-                    
+
+                    # Chỉ chọn trong số các cặp thực sự nối được (BFS hợp lệ),
+                    # tránh chọn 2 ô có Q-value cao nhất nhưng không ăn được nhau.
+                    q_flat = q_values[0].reshape(-1)
+                    best_action = qvalues_to_action(
+                        q_flat, valid_actions, board_width=BOARDWIDTH, board_height=BOARDHEIGHT
+                    )
+                    if best_action is None:
+                        best_action = valid_actions[0]
+                    r1, c1, r2, c2 = best_action
+
                     ai_selected_pair = [(c1, r1), (c2, r2)]
                     ai_click_step = 0
                     ai_click_timer = time.time()
@@ -1246,9 +1243,9 @@ def drawBoard(board):
     cols = BOARDWIDTH  - 2
     rows = BOARDHEIGHT - 2
 
-    # --- Bước 1: Vẽ nền tối nhẹ ---
+    # --- Bước 1: Vẽ nền tối để che logo nền, tránh lem vào ô trống ---
     bg_surf = pygame.Surface((inner_w, inner_h), pygame.SRCALPHA)
-    bg_surf.fill((10, 15, 40, 55))
+    bg_surf.fill((10, 15, 40, 235))
     DISPLAYSURF.blit(bg_surf, (inner_left, inner_top))
 
     # --- Bước 2: Vẽ icon pokemon lên trên nền ---

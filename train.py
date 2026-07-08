@@ -2,7 +2,9 @@ import sys
 import os
 import yaml
 import torch
+import pygame  # Import pygame de xu ly su kien
 import numpy as np
+
 import matplotlib.pyplot as plt
 from model.model import PokemonModel
 from agent.agent import PikachuAgent
@@ -73,10 +75,10 @@ def train():
     model = PokemonModel(config, output_size).to(device)
     
     # Nap checkpoint de train tiep tu file cu neu ton tai
-    model_path = os.path.join(ROOT_DIR, "weights", "best_model_3.pt")
+    model_path = os.path.join(ROOT_DIR, "weights", "best_model.pt")
     initial_n_games = 0
     if os.path.exists(model_path):
-        print(f"--> Phat hien checkpoint cu (Model 3) tai: {model_path}")
+        print(f"--> Phat hien checkpoint cu tai: {model_path}")
         print("Dang nap trong so cu de tiep tuc huan luyen...")
         model.load(model_path, map_location=device)
         # Tiep tuc epsilon da giam
@@ -102,7 +104,6 @@ def train():
     plt.ion()
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
     
-    import pygame  # Import pygame de xu ly su kien
     
     for episode in range(1, EPISODES + 1):
         state = env.reset()
@@ -158,7 +159,7 @@ def train():
             best_score = env.score
             weights_dir = os.path.join(ROOT_DIR, "weights")
             os.makedirs(weights_dir, exist_ok=True)
-            model.save(os.path.join(weights_dir, "best_model_3.pt"))
+            model.save(os.path.join(weights_dir, "best_model.pt"))
             print(f"--> Da luu best model moi tai weights/best_model.pt voi Score: {best_score}")
             
     # Tat che do ve truc tiep, luu do thi cuoi cung
